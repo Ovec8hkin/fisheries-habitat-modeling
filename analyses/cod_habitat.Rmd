@@ -1,0 +1,100 @@
+---
+title: "Atlantic Cod Spawning Maps"
+output: html_notebook
+---
+
+
+```{r}
+source("src/plot_functions.R")
+source("src/data.R")
+
+library(data.table)
+```
+
+```{r}
+#prediction.data = read.csv("data/geo_predictions/cod_preds.csv")
+prediction.data = data.table::fread(file="data/geo_predictions/cod_preds.csv")
+
+prediction.data = as.data.frame(prediction.data)
+head(prediction.data)
+```
+```{r}
+monthly_environmental_averages = prediction.data %>% 
+  dplyr::group_by(year, month) %>% 
+  dplyr::summarise(sfc_temp=mean(sfc_temp),
+                   sfc_salt=mean(sfc_salt),
+                   btm_temp=mean(btm_temp),
+                   btm_salt=mean(btm_salt)
+                   )
+
+head(monthly_environmental_averages)
+
+```
+```{r}
+  i=1:dim(monthly_environmental_averages)[[1]]
+  monthly_environmental_averages$index = i
+  monthly_environmental_averages$date = as.yearmon(
+      paste(monthly_environmental_averages$month, monthly_environmental_averages$year, sep="-"), 
+      "%m-%Y")
+  two.year.rolling=rollmean(monthly_environmental_averages$sfc_temp, 24, na.pad=TRUE)
+  monthly_environmental_averages$two.year.rolling = two.year.rolling
+  
+  options(na.action="na.exclude")
+  rolling.lm = lm(two.year.rolling~date, monthly_environmental_averages)
+  monthly_environmental_averages$two.year.pred = predict(rolling.lm, data=monthly_environmental_averages)
+  summary(rolling.lm)
+
+```
+There has been an increase in overall temperatures throughout the NES ecosystem during the handcast timeseries, but the overall increase is small *(+0.017˚C per year)*, though significant *(p<1e-10)*. The linear fit shows that year accounts for only *13%* of the variation seen. _This is expected, as SST is a complex function with many covariates._ 
+
+```{r}
+ggplot(monthly_environmental_averages, aes(x=date, y=sfc_temp))+geom_point()+geom_line()+
+  geom_line(aes(y=two.year.rolling), color="red", size=1)+
+  geom_line(aes( y=two.year.pred), color="blue", size=1)+
+  ylim(0, 16)+
+  labs(x="Date", y="Surface Temperature (˚C)", title="NES Average Monthly Surface Temperature (1978-2016)")
+```
+Monthly variation was fairly regular from 1978 through 2010, after which there is a rather distinct rise in SST
+
+```{r}
+monthly_position = prediction.data %>% 
+  group_by(year, month) %>% 
+  summarise(temp=mean(sfc_temp), north=weighted.mean(north, predicted))
+
+monthly_position$date = as.yearmon(
+      paste(monthly_position$month, monthly_position$year, sep="-"), 
+      "%m-%Y")
+
+monthly.position.model = lm(north~temp, monthly_position)
+monthly_position$lm.pred = predict(monthly.position.model, monthly_position)
+
+summary(monthly.position.model)
+```
+```{r}
+ggplot(monthly_position, aes(x=date, y=north))+geom_point()+geom_line()
+ggplot(monthly_position)+geom_point(aes(x=temp, y=north, color=month))+geom_line(aes(x=temp, y=lm.pred), color="red")
+```
+```{r}
+annual_position = prediction.data %>% 
+  group_by(year) %>% 
+  summarise(temp=mean(sfc_temp), north=weighted.mean(north, predicted))
+
+annual.position.model = lm(north~temp, data=annual_position)
+annual_position$lm.pred = predict(annual.position.model, annual_position)
+
+summary(annual.position.model)
+```
+```{r}
+ggplot(annual_position)+geom_point(aes(x=temp, y=north, color=year))+geom_line(aes(x=temp, y=lm.pred))+
+  labs(x="SST (˚C)", y="Northing", title="Average Habitat Latitude")+xlim(7, 10)
+
+ggplot(annual_position, aes(x=year, y=north))+geom_point()+geom_line()
+```
+
+
+Add a new chunk by clicking the *Insert Chunk* button on the toolbar or by pressing *Cmd+Option+I*.
+
+When you save the notebook, an HTML file containing the code and output will be saved alongside it (click the *Preview* button or press *Cmd+Shift+K* to preview the HTML file). 
+
+The preview shows you a rendered HTML copy of the contents of the editor. Consequently, unlike *Knit*, *Preview* does not run any R code chunks. Instead, the output of the chunk when it was last run in the editor is displayed.
+
